@@ -14,6 +14,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+app.use('/uploads', express.static('uploads'));
 // --- Routes ---
 
 
@@ -43,6 +45,9 @@ app.get('/test-db', async (req, res) => {
 app.use('/api/auth', require('./routes/auth'));
 // -------------------------------------------
 
+// --- NEW LINE 2: REGISTER THE TASK ROUTES ---
+app.use('/api/tasks', require('./routes/tasks'));
+// ------------------------------------------
 // --- Start the Server ---
 const PORT = process.env.PORT || 4000;
 
