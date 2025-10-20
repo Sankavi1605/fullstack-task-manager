@@ -56,17 +56,78 @@ router.post('/', [verifyToken, upload.single('file')], async (req, res) => {
 // This route is protected
 router.get('/', verifyToken, async (req, res) => {
   try {
-    // Get tasks where the logged-in user is the assignee
-    const tasks = await db.query(
-      `SELECT t.*, u.username as assignee_name
-       FROM tasks t
-       JOIN users u ON t.assignee_id = u.user_id
-       WHERE t.assignee_id = $1
-       ORDER BY t.created_at DESC`,
-      [req.user.id]
-    );
+    // Get query parameters from the request
+    const { status, search, page = 1, limit = 10 } = req.query;
 
-    res.json(tasks.rows);
+    // --- 1. Build the Data Query ---
+    let baseQuery = `
+      SELECT t.*, u.username as assignee_name
+      FROM tasks t
+      JOIN users u ON t.assignee_id = u.user_id
+      WHERE t.assignee_id = $1
+    `;
+
+    // We will store our query parameters in this array
+    const queryParams = [req.user.id];
+
+    // --- 2. Build the Count Query ---
+    // We need a separate query to get the *total* number of items
+    // that match the filters, so we can calculate total pages.
+    let countQuery = `
+      SELECT COUNT(*) 
+      FROM tasks t
+      WHERE t.assignee_id = $1
+    `;
+
+    // --- 3. Add filters dynamically ---
+
+    // Add STATUS filter
+    if (status) {
+      queryParams.push(status);
+      baseQuery += ` AND t.status = $${queryParams.length}`;
+      countQuery += ` AND t.status = $${queryParams.length}`;
+    }
+
+    // Add SEARCH filter (case-insensitive)
+    if (search) {
+      queryParams.push(`%${search}%`); // Add wildcards for partial matching
+      baseQuery += ` AND t.title ILIKE $${queryParams.length}`; // ILIKE is case-insensitive
+      countQuery += ` AND t.title ILIKE $${queryParams.length}`;
+    }
+
+    // --- 4. Add sorting ---
+    baseQuery += ' ORDER BY t.created_at DESC';
+
+    // --- 5. Add pagination ---
+    const pageNumber = parseInt(page, 10);
+    const pageLimit = parseInt(limit, 10);
+    const offset = (pageNumber - 1) * pageLimit;
+
+    queryParams.push(pageLimit);
+    baseQuery += ` LIMIT $${queryParams.length}`;
+    queryParams.push(offset);
+    baseQuery += ` OFFSET $${queryParams.length}`;
+
+    // --- 6. Run the queries ---
+    const [tasksResult, countResult] = await Promise.all([
+      db.query(baseQuery, queryParams),
+      db.query(countQuery, queryParams.slice(0, -2)) // Run count without LIMIT/OFFSET params
+    ]);
+
+    const totalItems = parseInt(countResult.rows[0].count, 10);
+    const totalPages = Math.ceil(totalItems / pageLimit);
+
+    // --- 7. Send the response ---
+    res.json({
+      tasks: tasksResult.rows,
+      pagination: {
+        totalItems,
+        totalPages,
+        currentPage: pageNumber,
+        itemsPerPage: pageLimit,
+      },
+    });
+
   } catch (err) {
     console.error('Get Tasks Error:', err.message);
     res.status(500).send('Server Error');

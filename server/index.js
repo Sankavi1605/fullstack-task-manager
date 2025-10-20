@@ -48,6 +48,8 @@ app.use('/api/auth', require('./routes/auth'));
 // --- NEW LINE 2: REGISTER THE TASK ROUTES ---
 app.use('/api/tasks', require('./routes/tasks'));
 // ------------------------------------------
+
+app.use('/api/admin', require('./routes/admin'));
 // --- Start the Server ---
 const PORT = process.env.PORT || 4000;
 
