@@ -3,7 +3,27 @@
 const router = require('express').Router();
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
+const verifyAdmin = require('../middleware/verifyAdmin');
 const multer = require('multer');
+
+// GET ALL TASKS FOR LOGGED-IN USER
+router.get('/', verifyToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const result = await db.query(
+      `SELECT t.*, u.username as assignee_name
+       FROM tasks t
+       JOIN users u ON t.assignee_id = u.user_id
+       WHERE t.assignee_id = $1
+       ORDER BY t.due_date ASC`,
+      [userId]
+    );
+    res.json({ tasks: result.rows });
+  } catch (err) {
+    console.error('Get Tasks Error:', err.message);
+    res.status(500).send('Server Error');
+  }
+});
 
 // --- Multer Configuration for File Uploads ---
 
@@ -26,7 +46,7 @@ const upload = multer({ storage: storage });
 // CREATE A NEW TASK
 // This route is protected by verifyToken
 // It uses upload.single('file') to handle one file from a field named 'file'
-router.post('/', [verifyToken, upload.single('file')], async (req, res) => {
+router.post('/', [verifyToken, verifyAdmin, upload.single('file')], async (req, res) => {
   try {
     const { title, description, status, due_date, assignee_id } = req.body;
 
@@ -44,92 +64,9 @@ router.post('/', [verifyToken, upload.single('file')], async (req, res) => {
        RETURNING *`,
       [title, description, status, due_date, assignee_id, filePath]
     );
-
     res.json(newTask.rows[0]);
   } catch (err) {
     console.error('Create Task Error:', err.message);
-    res.status(500).send('Server Error');
-  }
-});
-
-// GET ALL TASKS FOR THE LOGGED-IN USER
-// This route is protected
-router.get('/', verifyToken, async (req, res) => {
-  try {
-    // Get query parameters from the request
-    const { status, search, page = 1, limit = 10 } = req.query;
-
-    // --- 1. Build the Data Query ---
-    let baseQuery = `
-      SELECT t.*, u.username as assignee_name
-      FROM tasks t
-      JOIN users u ON t.assignee_id = u.user_id
-      WHERE t.assignee_id = $1
-    `;
-
-    // We will store our query parameters in this array
-    const queryParams = [req.user.id];
-
-    // --- 2. Build the Count Query ---
-    // We need a separate query to get the *total* number of items
-    // that match the filters, so we can calculate total pages.
-    let countQuery = `
-      SELECT COUNT(*) 
-      FROM tasks t
-      WHERE t.assignee_id = $1
-    `;
-
-    // --- 3. Add filters dynamically ---
-
-    // Add STATUS filter
-    if (status) {
-      queryParams.push(status);
-      baseQuery += ` AND t.status = $${queryParams.length}`;
-      countQuery += ` AND t.status = $${queryParams.length}`;
-    }
-
-    // Add SEARCH filter (case-insensitive)
-    if (search) {
-      queryParams.push(`%${search}%`); // Add wildcards for partial matching
-      baseQuery += ` AND t.title ILIKE $${queryParams.length}`; // ILIKE is case-insensitive
-      countQuery += ` AND t.title ILIKE $${queryParams.length}`;
-    }
-
-    // --- 4. Add sorting ---
-    baseQuery += ' ORDER BY t.created_at DESC';
-
-    // --- 5. Add pagination ---
-    const pageNumber = parseInt(page, 10);
-    const pageLimit = parseInt(limit, 10);
-    const offset = (pageNumber - 1) * pageLimit;
-
-    queryParams.push(pageLimit);
-    baseQuery += ` LIMIT $${queryParams.length}`;
-    queryParams.push(offset);
-    baseQuery += ` OFFSET $${queryParams.length}`;
-
-    // --- 6. Run the queries ---
-    const [tasksResult, countResult] = await Promise.all([
-      db.query(baseQuery, queryParams),
-      db.query(countQuery, queryParams.slice(0, -2)) // Run count without LIMIT/OFFSET params
-    ]);
-
-    const totalItems = parseInt(countResult.rows[0].count, 10);
-    const totalPages = Math.ceil(totalItems / pageLimit);
-
-    // --- 7. Send the response ---
-    res.json({
-      tasks: tasksResult.rows,
-      pagination: {
-        totalItems,
-        totalPages,
-        currentPage: pageNumber,
-        itemsPerPage: pageLimit,
-      },
-    });
-
-  } catch (err) {
-    console.error('Get Tasks Error:', err.message);
     res.status(500).send('Server Error');
   }
 });
@@ -139,17 +76,43 @@ router.get('/', verifyToken, async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params; // Task ID
-    const { title, description, status, due_date, assignee_id } = req.body;
+    const { title, description, status, due_date, assignee_id, requestMessage, request_message } = req.body;
 
-    // We check that the user updating the task is the one it's assigned to
-    // (In a real app, you might also allow an ADMIN)
-    const updatedTask = await db.query(
-      `UPDATE tasks
-       SET title = $1, description = $2, status = $3, due_date = $4, assignee_id = $5
-       WHERE task_id = $6 AND assignee_id = $7
-       RETURNING *`,
-      [title, description, status, due_date, assignee_id, id, req.user.id]
-    );
+    // Use requestMessage from frontend, fallback to request_message if present
+    const reqMsg = requestMessage || request_message || null;
+
+    // Build dynamic update query
+    let updateFields = ['title', 'description', 'status', 'due_date', 'assignee_id'];
+    let updateValues = [title, description, status, due_date, assignee_id];
+    let setClauseArr = [];
+    for (let i = 0; i < updateFields.length; i++) {
+      setClauseArr.push(updateFields[i] + ' = $' + (i + 1));
+    }
+    let paramIndex = updateFields.length + 1;
+    if (reqMsg !== null && reqMsg !== undefined) {
+      setClauseArr.push('request_message = $' + paramIndex);
+      updateValues.push(reqMsg);
+      paramIndex++;
+    }
+    let setClause = setClauseArr.join(', ');
+
+    let query = '';
+    let params = updateValues.slice();
+    if (req.user.role === 'ADMIN') {
+      query = 'UPDATE tasks SET ' + setClause + ' WHERE task_id = $' + paramIndex + ' RETURNING *';
+      params.push(id);
+    } else {
+      query = 'UPDATE tasks SET ' + setClause + ' WHERE task_id = $' + paramIndex + ' AND assignee_id = $' + (paramIndex + 1) + ' RETURNING *';
+      params.push(id, req.user.id);
+    }
+
+    // Debug logging
+    console.log('--- UPDATE TASK DEBUG ---');
+    console.log('due_date:', due_date);
+    console.log('params:', params);
+    console.log('query:', query);
+
+    const updatedTask = await db.query(query, params);
 
     if (updatedTask.rows.length === 0) {
       return res
@@ -158,13 +121,12 @@ router.put('/:id', verifyToken, async (req, res) => {
     }
 
     res.json(updatedTask.rows[0]);
-  } catch (err) { // <--- THIS WAS THE INCOMPLETE LINE
-    // --- START OF FIXED CODE ---
+  } catch (err) {
     console.error('Update Task Error:', err.message);
     res.status(500).send('Server Error');
-    // --- END OF FIXED CODE ---
   }
 });
+
 
 // DELETE A TASK
 // This route is protected

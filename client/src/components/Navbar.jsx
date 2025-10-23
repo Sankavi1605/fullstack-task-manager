@@ -13,9 +13,14 @@ const Navbar = () => {
         <Link to="/" className="navbar-logo">
           TaskManager
         </Link>
-        <div>
+        <div className="navbar-right">
           {user && (
             <>
+              {user.role === 'ADMIN' && (
+                <Link to="/admin" className="navbar-link admin-panel-btn">
+                  <span className="admin-icon" aria-hidden="true"></span> Admin Panel
+                </Link>
+              )}
               <span className="navbar-user">Hi, {user.username}!</span>
               <button onClick={logout} className="logout-btn">
                 Logout

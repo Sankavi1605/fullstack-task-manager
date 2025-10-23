@@ -5,6 +5,7 @@ import { Routes, Route } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
+import AdminPage from './pages/AdminPage';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -21,7 +22,7 @@ function App() {
       */}
       <Route path="/" element={<ProtectedRoute />}>
         <Route path="/" element={<DashboardPage />} />
-        {/* We will add more protected routes here, like /admin */}
+        <Route path="/admin" element={<AdminPage />} />
       </Route>
     </Routes>
   );

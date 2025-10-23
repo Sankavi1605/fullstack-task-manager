@@ -58,11 +58,14 @@ const RegisterPage = () => {
           />
         </div>
         {error && <p className="error-message">{error}</p>}
-        <button type="submit" className="btn">Register</button>
+  <button type="submit" className="btn btn-primary">Register</button>
       </form>
       <p className="form-link">
         Already have an account? <Link to="/login">Login here</Link>
       </p>
+      <button type="button" className="btn-back" onClick={() => navigate(-1)}>
+        Back
+      </button>
     </div>
   );
 };

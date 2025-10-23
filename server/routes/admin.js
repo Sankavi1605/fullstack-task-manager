@@ -4,6 +4,7 @@ const router = require('express').Router();
 const db = require('../db');
 const verifyToken = require('../middleware/verifyToken');
 const verifyAdmin = require('../middleware/verifyAdmin');
+const bcrypt = require('bcryptjs');
 
 // All routes in this file are protected and require admin access
 // We apply the middlewares at the router level
@@ -78,5 +79,60 @@ router.get('/tasks', async (req, res) => {
   }
 });
 
+
+
+// --- Create a user (admin can create another admin) ---
+// POST /api/admin/users
+// body: { username, email, password, role? }
+router.post('/users', async (req, res) => {
+  try {
+    const { username, email, password, role = 'ADMIN' } = req.body;
+
+    // Prevent invalid roles
+    const normalizedRole = role === 'ADMIN' ? 'ADMIN' : 'USER';
+
+    // Check existing
+    const existing = await db.query('SELECT 1 FROM users WHERE email = $1', [email]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ message: 'User with this email already exists.' });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(password, salt);
+
+    const created = await db.query(
+      'INSERT INTO users (username, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING user_id, username, email, role, created_at',
+      [username, email, hash, normalizedRole]
+    );
+
+    res.status(201).json(created.rows[0]);
+  } catch (err) {
+    console.error('Admin Create User Error:', err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// --- Update role of a user ---
+// PUT /api/admin/users/:id/role  { role: 'ADMIN'|'USER' }
+router.put('/users/:id/role', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body;
+    if (!['ADMIN', 'USER'].includes(role)) {
+      return res.status(400).json({ message: 'Invalid role.' });
+    }
+    const updated = await db.query(
+      'UPDATE users SET role = $1 WHERE user_id = $2 RETURNING user_id, username, email, role, created_at',
+      [role, id]
+    );
+    if (updated.rows.length === 0) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+    res.json(updated.rows[0]);
+  } catch (err) {
+    console.error('Admin Update Role Error:', err.message);
+    res.status(500).send('Server Error');
+  }
+});
 
 module.exports = router;
