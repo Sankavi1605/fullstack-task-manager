@@ -12,12 +12,14 @@
   border: none;
   transition: all 0.18s cubic-bezier(.4,2,.3,1);
   margin-right: 1.2em;
+  text-decoration: none;
 }
 .navbar-link.admin-panel-btn:hover {
   filter: brightness(1.08);
   transform: translateY(-2px) scale(1.03);
   box-shadow: 0 4px 24px rgba(99,102,241,0.25);
   color: #fff;
+  text-decoration: none;
 }
 .admin-icon {
   font-size: 1.2em;

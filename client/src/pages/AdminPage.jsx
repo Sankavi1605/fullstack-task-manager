@@ -172,6 +172,9 @@ const AdminPage = () => {
           </form>
         </section>
 
+        {/* All Tasks Section - moved here for better flow */}
+        <AdminTasksSection />
+
         {/* Users List Section */}
         <section className="admin-section">
           <h2>Manage Users</h2>
